@@ -1,0 +1,2 @@
+{"qid":"q1","question":"Find two synthetic papers.","gold_papers":[{"title":"Constraint-Guided Text-to-SQL","arxiv_id":"2401.01234"},{"title":"Evidence-Aware Scholarly Retrieval","arxiv_id":"2402.14797"}]}
+{"qid":"q2","question":"Find a paper with a numeric model name.","gold_papers":[{"title":"GPT-4 for Scientific Discovery","arxiv_id":"2406.09455"}]}

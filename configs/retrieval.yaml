@@ -1,0 +1,12 @@
+# Documentation-only configuration snapshot for B0.
+provider: openalex
+strategy: raw_query_direct_search
+per_page: 100
+top_k: [20, 50, 100]
+cutoff_offset_days: 7
+cache_dir: data/cache/openalex
+max_retries: 3
+connect_timeout_seconds: 10
+read_timeout_seconds: 45
+estimated_search_cost_per_1000_calls_usd: 1.0
+llm_used: false

@@ -1,0 +1,2 @@
+{"question": "Find papers that use execution feedback for text-to-SQL.", "answer": ["A Synthetic Study of Execution Feedback for Text-to-SQL", "Constraint-Guided Database Query Generation"], "source_meta": {"published_time": "20241001", "source_title": "Synthetic source record"}}
+{"question": "Find papers about efficient scholarly retrieval agents.", "answer": ["2401.01234", {"title": "A Synthetic Paper Search Agent", "arxiv_id": "2402.05678"}], "source_meta": {"published_time": "20241001", "source_title": "Synthetic source record"}}
