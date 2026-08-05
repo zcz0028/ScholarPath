@@ -1,0 +1,31 @@
+{
+    "expected_query_count": 50,
+    "required_files": [
+        "predictions_top20.jsonl",
+        "predictions_top50.jsonl",
+        "predictions_top100.jsonl",
+        "run_summary.json"
+    ],
+    "baselines": [
+        {
+            "name": "b4_fusion_semantic",
+            "role": "candidate_baseline",
+            "path": "outputs/b4_fusion_semantic"
+        },
+        {
+            "name": "b5_1_guard_balanced_v4",
+            "role": "primary_recommendation",
+            "path": "outputs/b5_1_guard_balanced_v4"
+        },
+        {
+            "name": "b5_on_b4_precision",
+            "role": "high_precision",
+            "path": "outputs/b5_on_b4_precision"
+        },
+        {
+            "name": "b5_2_guard_aware_balanced",
+            "role": "guard_aware_balanced",
+            "path": "outputs/b5_2_guard_aware_balanced"
+        }
+    ]
+}
