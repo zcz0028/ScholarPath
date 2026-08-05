@@ -8,7 +8,11 @@ from typing import Any, Iterable
 
 from scholarpath.paper.schema import PaperRecord
 
-from .matching import deduplicate_predictions, match_papers
+from .matching import (
+    deduplicate_predictions,
+    deduplicate_predictions_v2,
+    match_papers,
+)
 
 
 def safe_divide(numerator: int | float, denominator: int | float) -> float:
@@ -30,7 +34,7 @@ class EvaluationConfig:
     deduplicate: bool = True
 
     def __post_init__(self) -> None:
-        if self.mode not in {"strict", "pasa_title"}:
+        if self.mode not in {"strict", "strict_v2", "pasa_title"}:
             raise ValueError(f"Unsupported mode: {self.mode}")
         cleaned = sorted({int(k) for k in self.recall_at if int(k) > 0})
         self.recall_at = tuple(cleaned)
@@ -161,9 +165,12 @@ def _evaluate_single_query(
 ) -> QueryEvaluation:
     raw_prediction_count = len(predictions)
     if config.deduplicate:
-        evaluated_predictions, removed_duplicates = deduplicate_predictions(
-            predictions
+        deduplicator = (
+            deduplicate_predictions_v2
+            if config.mode == "strict_v2"
+            else deduplicate_predictions
         )
+        evaluated_predictions, removed_duplicates = deduplicator(predictions)
     else:
         evaluated_predictions = list(predictions)
         removed_duplicates = []

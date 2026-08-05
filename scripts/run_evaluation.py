@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
         "--mode",
-        choices=("strict", "pasa_title"),
+        choices=("strict", "strict_v2", "pasa_title"),
         default="strict",
     )
     parser.add_argument(

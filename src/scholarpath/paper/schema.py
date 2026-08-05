@@ -4,6 +4,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 from .normalizers import (
+    arxiv_id_from_doi,
+    extract_arxiv_id,
+    extract_doi,
+    extract_openalex_id,
     normalize_arxiv_id,
     normalize_doi,
     normalize_openalex_id,
@@ -146,10 +150,72 @@ class PaperRecord:
                 result.add(f"{prefix}:{value}")
         return result
 
+    def inferred_identifiers(self) -> dict[str, str]:
+        """Infer identifiers from DOI, URL, and source record IDs.
+
+        These inferred values are used only by the Day-2 identity-aware
+        matching path. Existing ``strict`` evaluation remains unchanged.
+        """
+        values: dict[str, str] = {}
+        doi = self.doi or extract_doi(self.url) or extract_doi(self.source_record_id)
+        arxiv_id = (
+            self.arxiv_id
+            or arxiv_id_from_doi(doi)
+            or extract_arxiv_id(self.url)
+            or extract_arxiv_id(self.source_record_id)
+        )
+        openalex_id = (
+            self.openalex_id
+            or extract_openalex_id(self.url)
+            or extract_openalex_id(self.source_record_id)
+        )
+        if doi:
+            values["doi"] = doi
+        if arxiv_id:
+            values["arxiv_id"] = arxiv_id
+        if openalex_id:
+            values["openalex_id"] = openalex_id
+        if self.semantic_scholar_id:
+            values["semantic_scholar_id"] = self.semantic_scholar_id
+        return values
+
+    def identity_keys_v2(self) -> set[str]:
+        inferred = self.inferred_identifiers()
+        result: set[str] = set()
+        for prefix, field_name in (
+            ("doi", "doi"),
+            ("arxiv", "arxiv_id"),
+            ("openalex", "openalex_id"),
+            ("s2", "semantic_scholar_id"),
+        ):
+            value = inferred.get(field_name)
+            if value:
+                result.add(f"{prefix}:{value}")
+        return result
+
+    @property
+    def canonical_id_v2(self) -> str:
+        inferred = self.inferred_identifiers()
+        arxiv_id = inferred.get("arxiv_id")
+        doi = inferred.get("doi")
+        if arxiv_id and (not doi or arxiv_id_from_doi(doi)):
+            return f"arxiv:{arxiv_id}"
+        if doi:
+            return f"doi:{doi}"
+        if arxiv_id:
+            return f"arxiv:{arxiv_id}"
+        if inferred.get("openalex_id"):
+            return f"openalex:{inferred['openalex_id']}"
+        if inferred.get("semantic_scholar_id"):
+            return f"s2:{inferred['semantic_scholar_id']}"
+        return f"title:{title_fingerprint(self.title)}"
+
     def to_dict(self, include_raw: bool = False) -> dict[str, Any]:
         payload = asdict(self)
         if not include_raw:
             payload.pop("raw", None)
         payload["normalized_title"] = self.normalized_title
         payload["canonical_id"] = self.canonical_id
+        payload["inferred_identifiers"] = self.inferred_identifiers()
+        payload["canonical_id_v2"] = self.canonical_id_v2
         return payload
