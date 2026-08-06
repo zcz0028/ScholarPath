@@ -72,3 +72,38 @@
 - [ ] zero-recall 不高于 20
 
 若两项目标均达到，Day 4 判定为“达标”。若指标有真实提升但未达到目标，判定为“部分达标”，保留有效计划并在 Day 5 开展受控引文扩展和消融实验。
+
+测试结果：130 passed in 2.94s
+
+目标查询数：24
+执行检索计划数：48
+
+修复后重跑：
+Actual API calls：0
+Cache hits：48
+Estimated cost：$0.000000
+
+冷启动检索预算：
+最多 48 次 OpenAlex 请求
+
+Strict：
+Top20 TP：58
+Top50 TP：81
+Top100 TP：105
+
+Top100 TP：61 → 105（+44）
+Zero-recall：26 → 11
+Recovered queries：15
+
+输出完整性：
+query_count：50
+missing_prediction_qids：[]
+extra_prediction_qids：[]
+
+去重：
+Top20 duplicates_removed：0
+Top50 duplicates_removed：2
+Top100 duplicates_removed：3
+
+结论：
+Day 4 定向救援召回达到实验门槛，进入 Day 5 受控引文扩展。
