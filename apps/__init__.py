@@ -1,0 +1,1 @@
+"""ScholarPath application packages."""
