@@ -22,16 +22,18 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = useCopy(language);
+  const hasRun = Boolean(response || loading || error);
 
   useEffect(() => {
     getBenchmarkQueries().then((result) => setBenchmarkQueries(result.items)).catch((err: Error) => setError(err.message));
   }, []);
 
-  useEffect(() => {
-    setSelectedPaper(null);
-  }, [response?.run_id]);
+  useEffect(() => setSelectedPaper(null), [response?.run_id]);
 
-  const selectedBenchmark = useMemo(() => benchmarkQueries.find((item) => item.qid === selectedQid) || null, [benchmarkQueries, selectedQid]);
+  const selectedBenchmark = useMemo(
+    () => benchmarkQueries.find((item) => item.qid === selectedQid) || null,
+    [benchmarkQueries, selectedQid],
+  );
 
   function changeMode(nextMode: SearchMode) {
     setMode(nextMode);
@@ -65,33 +67,64 @@ export default function App() {
     }
     setLoading(true); setError(null); setSelectedPaper(null);
     try {
-      const result = await searchScholarPath({ query: clean, qid: mode === "benchmark" ? qid : null, mode, top_k: 20, enable_citation: mode === "benchmark" });
+      const result = await searchScholarPath({
+        query: clean,
+        qid: mode === "benchmark" ? qid : null,
+        mode,
+        top_k: 20,
+        enable_citation: mode === "benchmark",
+      });
       setResponse(result);
       setReasoningExpanded(false);
     } catch (err) {
       setResponse(null);
       setError(err instanceof Error ? err.message : copy.error);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${hasRun ? "workspace-state" : "landing-state"}`}>
     <Header language={language} onLanguageChange={setLanguage} mode={mode} onModeChange={changeMode} response={response} />
     <main className="page-content">
-      <SearchHero language={language} mode={mode} query={query} onQueryChange={updateQuery} onSearch={runSearch} benchmarkQueries={benchmarkQueries} selectedQid={selectedQid} onSelectBenchmark={selectBenchmark} loading={loading} />
+      <SearchHero
+        language={language}
+        mode={mode}
+        query={query}
+        onQueryChange={updateQuery}
+        onSearch={runSearch}
+        benchmarkQueries={benchmarkQueries}
+        selectedQid={selectedQid}
+        onSelectBenchmark={selectBenchmark}
+        loading={loading}
+        compact={hasRun}
+      />
+
+      {!hasRun && <LandingModeNote language={language} mode={mode} />}
+
       {error && <div className="status-message error"><AlertCircle size={18} /><div><strong>{copy.error}</strong><span>{error}</span></div></div>}
       {loading && <div className="status-message loading"><LoaderCircle size={19} className="spin" /><span>{copy.loading}</span></div>}
-      {response && <SearchReasoning language={language} response={response} expanded={reasoningExpanded} onToggle={() => setReasoningExpanded((value) => !value)} />}
-      <div className="workspace-grid">
-        <div className="result-column">{response ? <PaperList language={language} papers={response.results} selectedPaper={selectedPaper} onSelectPaper={setSelectedPaper} /> : <WelcomeState language={language} mode={mode} queryCount={benchmarkQueries.length} />}</div>
-        <PaperDetails language={language} paper={selectedPaper} />
-      </div>
-      {response?.warnings.length ? <div className="warning-box"><AlertCircle size={17} /><div><strong>{copy.warning}</strong>{response.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div></div> : null}
+
+      {response && <>
+        <SearchReasoning language={language} response={response} expanded={reasoningExpanded} onToggle={() => setReasoningExpanded((value) => !value)} />
+        <div className="workspace-grid">
+          <div className="result-column">
+            <PaperList language={language} papers={response.results} selectedPaper={selectedPaper} onSelectPaper={setSelectedPaper} />
+          </div>
+          <PaperDetails language={language} paper={selectedPaper} />
+        </div>
+        {response.warnings.length > 0 && <div className="warning-box"><AlertCircle size={17} /><div><strong>{copy.warning}</strong>{response.warnings.map((warning, index) => <p key={index}>{warning}</p>)}</div></div>}
+      </>}
     </main>
-    <PipelineBar language={language} response={response} />
+    {hasRun && <PipelineBar language={language} response={response} />}
   </div>;
 }
 
-function WelcomeState({ language, mode, queryCount }: { language: Language; mode: SearchMode; queryCount: number }) {
+function LandingModeNote({ language, mode }: { language: Language; mode: SearchMode }) {
   const copy = useCopy(language);
-  return <section className="welcome-card"><div className="welcome-orb"><span /></div><h2>ScholarPath</h2><p>{mode === "benchmark" ? `${copy.benchmarkQueries}: ${queryCount}` : copy.liveHint}</p><span>{mode === "benchmark" ? copy.benchmarkHint : copy.liveDisabledCitation}</span></section>;
+  return <div className="landing-mode-note">
+    <span className={`mode-dot ${mode}`} />
+    <strong>{mode === "benchmark" ? copy.benchmark : copy.live}</strong>
+    <span>{mode === "benchmark" ? copy.benchmarkLandingNote : copy.liveLandingNote}</span>
+  </div>;
 }

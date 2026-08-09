@@ -21,7 +21,7 @@ export function PaperList({ language, papers, selectedPaper, onSelectPaper }: Pa
           <h2>{paper.title}</h2>
           <p className="paper-authors">{paper.authors.length ? paper.authors.slice(0, 6).join(", ") + (paper.authors.length > 6 ? ", et al." : "") : "—"}</p>
           <p className="paper-meta">{[paper.year, paper.venue].filter(Boolean).join(" · ")}</p>
-          <div className="paper-tags">{paper.reason_tags.slice(0, 5).map((tag) => <span key={tag}>{formatTag(tag)}</span>)}{paper.openalex_id && <span>OpenAlex</span>}{paper.arxiv_id && <span>arXiv</span>}{paper.doi && <span>DOI</span>}</div>
+          <div className="paper-tags">{paper.reason_tags.slice(0, 5).map((tag) => <span key={tag}>{formatTag(tag, language)}</span>)}{paper.openalex_id && <span>OpenAlex</span>}{paper.arxiv_id && <span>arXiv</span>}{paper.doi && <span>DOI</span>}</div>
         </div>
         <div className="paper-side">
           <div className="score-box"><strong>{paper.score == null ? "—" : paper.score.toFixed(3)}</strong><span>{copy.score}</span></div>
@@ -32,4 +32,15 @@ export function PaperList({ language, papers, selectedPaper, onSelectPaper }: Pa
   </section>;
 }
 
-function formatTag(tag: string) { return tag.replace(/_/g, " "); }
+function formatTag(tag: string, language: Language) {
+  const labels: Record<string, [string, string]> = {
+    anchor_rescue_source: ["救援召回", "Rescue Retrieval"],
+    multi_plan_supported: ["多计划支持", "Multi-plan Support"],
+    high_rank_rescue_hit: ["高位救援命中", "High-rank Rescue"],
+    strong_identifier_available: ["强标识符", "Strong ID"],
+    multi_source_supported: ["多来源支持", "Multi-source Support"],
+    high_rank_in_at_least_one_source: ["来源高排名", "High Rank in Source"],
+  };
+  const mapped = labels[tag];
+  return mapped ? mapped[language === "zh" ? 0 : 1] : tag.replace(/_/g, " ");
+}
