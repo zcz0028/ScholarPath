@@ -52,6 +52,10 @@ class PaperResult(BaseModel):
     reason_tags: list[str] = Field(default_factory=list)
     reason_text: str | None = None
     constraint_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    matched_constraints: list[str] = Field(default_factory=list)
+    unmatched_constraints: list[str] = Field(default_factory=list)
+    matched_count: int = 0
+    constraint_count: int = 0
     retrieval_sources: list[str] = Field(default_factory=list)
     citation_path: CitationPathView | None = None
 

@@ -17,10 +17,15 @@ from apps.api.settings import ApiSettings
 
 from scholarpath.query.academic_query_planner import AcademicQueryPlanner, PlannerConfig
 from scholarpath.query.constraints import ConstraintDecomposer
-from scholarpath.rerank.semantic_rerank import (
-    annotate_and_semantic_rerank_record,
-    make_semantic_config,
+from scholarpath.rerank.constraint_evidence import (
+    ConstraintEvidence,
+    build_canonical_constraints,
 )
+from scholarpath.rerank.evidence_aware_rerank import (
+    EvidenceAwareConfig,
+    annotate_and_evidence_rerank_record,
+)
+from scholarpath.rerank.recommendation_reason import attach_recommendation_reason
 from scholarpath.retrieval.base import SearchRequest
 from scholarpath.retrieval.openalex import OpenAlexConfig, OpenAlexError, OpenAlexRetriever
 
@@ -73,6 +78,10 @@ def _sources(raw: dict[str, Any]) -> list[str]:
 
 
 def _reason_tags(raw: dict[str, Any]) -> list[str]:
+    day8 = raw.get("day8_reason_tags")
+    if isinstance(day8, list):
+        return [str(x) for x in day8 if x]
+
     tags: list[str] = []
     for key in (
         "b5_2_reason_tags",
@@ -89,6 +98,10 @@ def _reason_tags(raw: dict[str, Any]) -> list[str]:
 
 
 def _reason_text(raw: dict[str, Any]) -> str | None:
+    day8 = str(raw.get("day8_reason_text") or "").strip()
+    if day8:
+        return day8
+
     for key in (
         "b5_2_reason",
         "b5_1_guard_reason",
@@ -103,6 +116,13 @@ def _reason_text(raw: dict[str, Any]) -> str | None:
 
 
 def _constraint_evidence(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    # Day8 evidence is the production truth layer. Do not mix legacy Guard
+    # missing-constraint rows into it, otherwise the API may expose duplicate or
+    # contradictory evidence for the same paper.
+    day8 = raw.get("day8_constraint_evidence")
+    if isinstance(day8, list):
+        return [dict(item) for item in day8 if isinstance(item, dict)]
+
     output: list[dict[str, Any]] = []
     evidence = raw.get("b5_1_constraint_evidence") or raw.get("constraint_evidence")
     if isinstance(evidence, list):
@@ -127,6 +147,7 @@ def _paper_openalex_id(paper: dict[str, Any]) -> str | None:
 
 def _paper_score(raw: dict[str, Any]) -> float | None:
     for key in (
+        "day8_final_score",
         "b5_2_final_score",
         "b5_1_final_score",
         "selector_score",
@@ -139,6 +160,81 @@ def _paper_score(raw: dict[str, Any]) -> float | None:
         if value is not None:
             return value
     return None
+
+
+def _typed_day8_evidence(raw: dict[str, Any]) -> list[ConstraintEvidence]:
+    rows = raw.get("day8_constraint_evidence")
+    if not isinstance(rows, list):
+        return []
+
+    output: list[ConstraintEvidence] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        try:
+            output.append(
+                ConstraintEvidence(
+                    constraint_id=str(item.get("constraint_id") or ""),
+                    constraint_text=str(item.get("constraint_text") or ""),
+                    constraint_type=str(item.get("constraint_type") or "topic"),
+                    matched=bool(item.get("matched")),
+                    match_type=str(item.get("match_type") or "none"),
+                    evidence_field=(
+                        str(item.get("evidence_field"))
+                        if item.get("evidence_field") is not None
+                        else None
+                    ),
+                    evidence_text=(
+                        str(item.get("evidence_text"))
+                        if item.get("evidence_text") is not None
+                        else None
+                    ),
+                    confidence=float(item.get("confidence") or 0.0),
+                    token_coverage=float(item.get("token_coverage") or 0.0),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return output
+
+
+def _apply_day8_stack(
+    record: dict[str, Any],
+    decomposition: Any,
+) -> dict[str, Any]:
+    """Apply the frozen Day8 production stack: E3 ranking + evidence + reason.
+
+    Ranking is fixed to E3 alpha=1.0 / beta=0.0 from the accepted Day8-1C
+    ablation. Constraint evidence remains an explanation signal and is not
+    linearly fused into the production ranking score.
+    """
+    reranked = annotate_and_evidence_rerank_record(
+        record,
+        decomposition,
+        EvidenceAwareConfig(variant="E3", alpha=1.0),
+    )
+    question = str(reranked.get("question") or decomposition.question or "")
+    canonical = build_canonical_constraints(
+        question=question,
+        constraints=decomposition.constraints,
+    )
+
+    annotated: list[dict[str, Any]] = []
+    for paper in reranked.get("papers") or []:
+        if not isinstance(paper, dict):
+            continue
+        evidence = _typed_day8_evidence(_raw_meta(paper))
+        annotated.append(
+            attach_recommendation_reason(
+                paper,
+                constraints=canonical,
+                evidence=evidence,
+            )
+        )
+
+    output = dict(reranked)
+    output["papers"] = annotated
+    return output
 
 
 class SearchService:
@@ -171,11 +267,15 @@ class SearchService:
                 "Benchmark mode uses the qid-linked frozen result; request.query differs from the benchmark question."
             )
 
-        prediction = self.artifacts.day4_predictions(request.top_k).get(request.qid)
+        # E3 was evaluated on the frozen Day-4 Top100 candidate pool. Always
+        # rerank that same pool, then slice to the requested top_k so API output
+        # matches the accepted offline experiment.
+        prediction = self.artifacts.day4_predictions(100).get(request.qid)
         if prediction is None:
-            raise QueryNotFoundError(f"No Day-4 prediction for {request.qid}")
+            raise QueryNotFoundError(f"No Day-4 Top100 prediction for {request.qid}")
 
         decomposition = self.decomposer.decompose(canonical_question)
+        day8_record = _apply_day8_stack(dict(prediction), decomposition)
         plan = self.artifacts.query_plans().get(request.qid) or {}
         anchors = self.artifacts.anchor_inventory().get(request.qid) or {}
         paths_by_qid = self.artifacts.day5_citation_paths()
@@ -186,7 +286,7 @@ class SearchService:
             if expanded and expanded not in path_by_paper:
                 path_by_paper[expanded] = path
 
-        papers = prediction.get("papers") if isinstance(prediction.get("papers"), list) else []
+        papers = day8_record.get("papers") if isinstance(day8_record.get("papers"), list) else []
         results = [
             self._to_paper_result(
                 paper,
@@ -204,6 +304,9 @@ class SearchService:
             {"name": "constraint_decomposition", "status": "completed", "count": len(decomposition.constraints)},
             {"name": "academic_query_planning", "status": "completed" if plan else "not_frozen", "count": len(plan.get("planned_queries") or []) if isinstance(plan, dict) else 0},
             {"name": "day4_rescue", "status": "triggered" if request.qid in self.artifacts.day4_target_qids() else "preserved"},
+            {"name": "day8_e3_rerank", "status": "completed", "variant": "E3", "alpha": 1.0, "beta": 0.0},
+            {"name": "day8_constraint_evidence", "status": "completed"},
+            {"name": "day8_recommendation_reason", "status": "completed"},
         ]
         if request.enable_citation:
             stages.append(
@@ -216,7 +319,7 @@ class SearchService:
             )
             if citation_paths:
                 warnings.append(
-                    "Day-5 citation artifacts are shown as discovery/explanation paths; final benchmark ranking remains the evaluated Day-4 Top-K."
+                    "Day-5 citation artifacts are shown as discovery/explanation paths and do not alter the Day8 E3 benchmark ranking."
                 )
 
         retrieval_summary = day4_summary.get("retrieval") if isinstance(day4_summary.get("retrieval"), dict) else {}
@@ -305,11 +408,7 @@ class SearchService:
             raise LiveRetrievalError("All live OpenAlex retrieval plans failed or returned no candidates")
 
         record = {"qid": qid, "question": request.query, "papers": all_papers}
-        reranked = annotate_and_semantic_rerank_record(
-            record,
-            decomposition,
-            make_semantic_config("semantic_first"),
-        )
+        reranked = _apply_day8_stack(record, decomposition)
         ranked_papers = list(reranked.get("papers") or [])[: min(request.top_k, self.settings.live_max_results)]
         results = [
             self._to_paper_result(paper, rank=index, citation_path=None)
@@ -317,8 +416,8 @@ class SearchService:
             if isinstance(paper, dict)
         ]
         warnings = [
-            "Live mode performs query planning, OpenAlex retrieval, deduplication and lightweight semantic reranking.",
-            "Fresh live candidates do not yet have frozen Guard/Selector evidence; benchmark mode should be used for evaluated competition metrics.",
+            "Live mode performs query planning, OpenAlex retrieval, deduplication, Day8 E3 pure-semantic reranking and deterministic evidence/reason generation.",
+            "Fresh live candidates do not have frozen Guard/Selector labels; benchmark mode should be used for evaluated competition metrics.",
         ]
         if request.enable_citation:
             warnings.append("Online citation expansion is intentionally disabled in Day-6 live mode for latency and budget control.")
@@ -333,7 +432,13 @@ class SearchService:
             query_plan=[item.to_dict() for item in planned_queries],
             results=results,
             pipeline=PipelineSummary(
-                stages=[{"name": "query_planner", "status": "completed", "count": len(planned_queries)}, *stage_rows, {"name": "semantic_rerank", "status": "completed"}],
+                stages=[
+                    {"name": "query_planner", "status": "completed", "count": len(planned_queries)},
+                    *stage_rows,
+                    {"name": "day8_e3_rerank", "status": "completed", "variant": "E3", "alpha": 1.0, "beta": 0.0},
+                    {"name": "day8_constraint_evidence", "status": "completed"},
+                    {"name": "day8_recommendation_reason", "status": "completed"},
+                ],
                 total_candidates=len(all_papers),
                 returned_results=len(results),
             ),
@@ -393,6 +498,10 @@ class SearchService:
             reason_tags=_reason_tags(raw),
             reason_text=_reason_text(raw),
             constraint_evidence=_constraint_evidence(raw),
+            matched_constraints=[str(x) for x in raw.get("day8_matched_constraints") or []],
+            unmatched_constraints=[str(x) for x in raw.get("day8_unmatched_constraints") or []],
+            matched_count=int(raw.get("day8_matched_count") or 0),
+            constraint_count=int(raw.get("day8_constraint_count") or 0),
             retrieval_sources=_sources(raw) or list(raw.get("retrieval_sources") or []),
             citation_path=path_view,
         )

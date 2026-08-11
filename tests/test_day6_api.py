@@ -191,6 +191,10 @@ def test_benchmark_search(client: TestClient) -> None:
     assert payload["mode"] == "benchmark"
     assert payload["results"][0]["title"] == "A Relevant Paper"
     assert payload["results"][0]["citation_path"]["seed_title"] == "Seed"
+    assert payload["results"][0]["constraint_count"] >= 1
+    assert isinstance(payload["results"][0]["constraint_evidence"], list)
+    assert payload["results"][0]["reason_text"] is not None
+    assert any(stage["name"] == "day8_e3_rerank" for stage in payload["pipeline"]["stages"])
     assert payload["cost"]["api_calls"] == 0
     assert "SECRET GOLD TITLE" not in json.dumps(payload)
 
@@ -246,3 +250,81 @@ def test_missing_prediction_artifact_is_structured_error(client: TestClient, tmp
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "QUERY_NOT_FOUND"
+
+
+def test_live_search_uses_day8_e3_and_deterministic_reason(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from apps.api.services import search_service as module
+
+    class FakePaper:
+        def __init__(self, canonical_id: str, title: str) -> None:
+            self.canonical_id_v2 = canonical_id
+            self._title = title
+
+        def to_dict(self, *, include_raw: bool = False) -> dict:
+            payload = {
+                "title": self._title,
+                "authors": ["Test Author"],
+                "year": 2025,
+                "openalex_id": self.canonical_id_v2.split(":", 1)[-1],
+                "url": "https://example.test/" + self.canonical_id_v2,
+            }
+            if include_raw:
+                payload["raw"] = {"concepts": []}
+            return payload
+
+    class FakeRetriever:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        def search(self, _request: object) -> object:
+            return SimpleNamespace(
+                papers=[
+                    FakePaper("openalex:W1", "A Survey of Large Language Models"),
+                    FakePaper("openalex:W2", "Multimodal Large Language Models for Scientific Documents"),
+                ],
+                raw_result_count=2,
+                stats=SimpleNamespace(
+                    actual_api_calls=1,
+                    cache_hits=0,
+                    retries=0,
+                    estimated_api_cost_usd=0.001,
+                ),
+            )
+
+    monkeypatch.setattr(module, "OpenAlexRetriever", FakeRetriever)
+
+    response = client.post(
+        "/api/search",
+        json={
+            "query": "recent papers on multimodal large language models for scientific document understanding",
+            "mode": "live",
+            "top_k": 20,
+            "enable_citation": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "live"
+    assert payload["results"]
+
+    first = payload["results"][0]
+    assert first["title"] == "Multimodal Large Language Models for Scientific Documents"
+    assert first["score"] is not None
+    assert first["matched_count"] >= 2
+    assert first["constraint_count"] >= first["matched_count"]
+    assert "large language model" in first["matched_constraints"]
+    assert "multimodal" in first["matched_constraints"]
+    assert "model_or_entity_match" in first["reason_tags"]
+    assert "task_or_modality_match" in first["reason_tags"]
+    assert first["reason_text"]
+    assert first["constraint_evidence"]
+    assert first["citation_path"] is None
+
+    stage_names = [stage["name"] for stage in payload["pipeline"]["stages"]]
+    assert "day8_e3_rerank" in stage_names
+    assert "day8_constraint_evidence" in stage_names
+    assert "day8_recommendation_reason" in stage_names
