@@ -17,6 +17,20 @@ export interface CitationPathView {
   hop?: number | null;
 }
 
+export type ConstraintEvidenceField = "title" | "abstract" | "concept" | null;
+
+export interface ConstraintEvidenceItem {
+  constraint_id: string;
+  constraint_text: string;
+  constraint_type: string;
+  matched: boolean;
+  match_type: string;
+  evidence_field: ConstraintEvidenceField;
+  evidence_text?: string | null;
+  confidence: number;
+  token_coverage: number;
+}
+
 export interface PaperResult {
   rank: number;
   title: string;
@@ -31,7 +45,11 @@ export interface PaperResult {
   relevance_level?: string | null;
   reason_tags: string[];
   reason_text?: string | null;
-  constraint_evidence: Record<string, unknown>[];
+  constraint_evidence: ConstraintEvidenceItem[];
+  matched_constraints: string[];
+  unmatched_constraints: string[];
+  matched_count: number;
+  constraint_count: number;
   retrieval_sources: string[];
   citation_path?: CitationPathView | null;
 }
