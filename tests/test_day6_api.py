@@ -198,6 +198,18 @@ def test_benchmark_search(client: TestClient) -> None:
     assert payload["cost"]["api_calls"] == 0
     assert "SECRET GOLD TITLE" not in json.dumps(payload)
 
+    reasoning = payload["reasoning"]
+    assert reasoning is not None
+    assert reasoning["original_query"] == payload["query"]
+    assert reasoning["cleaned_query"]
+    assert reasoning["constraints"] == payload["parsed_constraints"]
+    assert reasoning["candidate_subqueries"]
+    assert reasoning["academic_anchors"] == payload["academic_anchors"]
+    assert reasoning["derived_aliases"] == []
+    assert reasoning["filters"] == {}
+    assert reasoning["selected_plans"] == payload["query_plan"]
+    assert reasoning["execution"] == payload["pipeline"]["stages"]
+
 
 def test_benchmark_search_requires_known_qid(client: TestClient) -> None:
     response = client.post(
@@ -323,6 +335,18 @@ def test_live_search_uses_day8_e3_and_deterministic_reason(
     assert first["reason_text"]
     assert first["constraint_evidence"]
     assert first["citation_path"] is None
+
+    reasoning = payload["reasoning"]
+    assert reasoning is not None
+    assert reasoning["original_query"] == payload["query"]
+    assert reasoning["cleaned_query"]
+    assert reasoning["constraints"] == payload["parsed_constraints"]
+    assert reasoning["candidate_subqueries"]
+    assert reasoning["academic_anchors"] == payload["academic_anchors"]
+    assert reasoning["selected_plans"] == payload["query_plan"]
+    assert reasoning["execution"] == payload["pipeline"]["stages"]
+    assert isinstance(reasoning["derived_aliases"], list)
+    assert isinstance(reasoning["filters"], dict)
 
     stage_names = [stage["name"] for stage in payload["pipeline"]["stages"]]
     assert "day8_e3_rerank" in stage_names

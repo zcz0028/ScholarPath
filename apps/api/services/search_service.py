@@ -9,6 +9,7 @@ from apps.api.schemas import (
     CostSummary,
     PaperResult,
     PipelineSummary,
+    SearchReasoning,
     SearchRequestModel,
     SearchResponse,
 )
@@ -117,7 +118,7 @@ def _reason_text(raw: dict[str, Any]) -> str | None:
         if value:
             return value
     tags = _reason_tags(raw)
-    return "；".join(tags[:4]) if tags else None
+    return "，".join(tags[:4]) if tags else None
 
 
 def _constraint_evidence(raw: dict[str, Any]) -> list[dict[str, Any]]:
@@ -347,15 +348,47 @@ class SearchService:
                     "Day-5 citation artifacts are shown as discovery/explanation paths and do not alter the Day8 E3 benchmark ranking."
                 )
 
+        # Day10-1B: expose a structured, user-facing search reasoning trace.
+        # This is an additive explanation layer only: it observes existing
+        # benchmark artifacts and execution metadata and does not alter ranking.
+        reasoning_constraints = [item.to_dict() for item in decomposition.constraints]
+        reasoning_anchors = self._extract_anchor_payload(plan, anchors)
+        reasoning_selected_plans = (
+            list(plan.get("planned_queries") or [])
+            if isinstance(plan, dict)
+            else []
+        )
+        reasoning = SearchReasoning(
+            original_query=canonical_question,
+            cleaned_query=decomposition.cleaned_question,
+            constraints=reasoning_constraints,
+            candidate_subqueries=[item.to_dict() for item in decomposition.subqueries],
+            academic_anchors=reasoning_anchors,
+            derived_aliases=(
+                [str(item) for item in plan.get("derived_aliases") or []]
+                if isinstance(plan, dict)
+                else []
+            ),
+            filters=(
+                dict(plan.get("filters") or {})
+                if isinstance(plan, dict)
+                and isinstance(plan.get("filters"), dict)
+                else {}
+            ),
+            selected_plans=reasoning_selected_plans,
+            execution=[dict(stage) for stage in stages],
+        )
+
         retrieval_summary = day4_summary.get("retrieval") if isinstance(day4_summary.get("retrieval"), dict) else {}
         return SearchResponse(
             run_id=f"bench_{request.qid}_{uuid.uuid4().hex[:8]}",
             query=canonical_question,
             qid=request.qid,
             mode="benchmark",
-            parsed_constraints=[item.to_dict() for item in decomposition.constraints],
-            academic_anchors=self._extract_anchor_payload(plan, anchors),
-            query_plan=list(plan.get("planned_queries") or []) if isinstance(plan, dict) else [],
+            reasoning=reasoning,
+            parsed_constraints=reasoning_constraints,
+            academic_anchors=reasoning_anchors,
+            query_plan=reasoning_selected_plans,
             results=results,
             pipeline=PipelineSummary(
                 stages=stages,
@@ -456,23 +489,40 @@ class SearchService:
         if request.enable_citation:
             warnings.append("Online citation expansion is intentionally disabled in Day-6 live mode for latency and budget control.")
 
+        reasoning_constraints = [item.to_dict() for item in decomposition.constraints]
+        reasoning_anchors = [anchor.to_dict() for anchor in plan.anchors]
+        reasoning_selected_plans = [item.to_dict() for item in planned_queries]
+        reasoning_execution = [
+            {"name": "query_planner", "status": "completed", "count": len(planned_queries)},
+            *stage_rows,
+            {"name": "day8_e3_rerank", "status": "completed", "variant": "E3", "alpha": 1.0, "beta": 0.0},
+            {"name": "day8_constraint_evidence", "status": "completed"},
+            {"name": "day8_recommendation_reason", "status": "completed"},
+        ]
+        reasoning = SearchReasoning(
+            original_query=request.query,
+            cleaned_query=decomposition.cleaned_question,
+            constraints=reasoning_constraints,
+            candidate_subqueries=[item.to_dict() for item in decomposition.subqueries],
+            academic_anchors=reasoning_anchors,
+            derived_aliases=list(plan.derived_aliases),
+            filters=dict(plan.filters),
+            selected_plans=reasoning_selected_plans,
+            execution=[dict(stage) for stage in reasoning_execution],
+        )
+
         return SearchResponse(
             run_id=f"live_{uuid.uuid4().hex[:12]}",
             query=request.query,
             qid=qid,
             mode="live",
-            parsed_constraints=[item.to_dict() for item in decomposition.constraints],
-            academic_anchors=[anchor.to_dict() for anchor in plan.anchors],
-            query_plan=[item.to_dict() for item in planned_queries],
+            reasoning=reasoning,
+            parsed_constraints=reasoning_constraints,
+            academic_anchors=reasoning_anchors,
+            query_plan=reasoning_selected_plans,
             results=results,
             pipeline=PipelineSummary(
-                stages=[
-                    {"name": "query_planner", "status": "completed", "count": len(planned_queries)},
-                    *stage_rows,
-                    {"name": "day8_e3_rerank", "status": "completed", "variant": "E3", "alpha": 1.0, "beta": 0.0},
-                    {"name": "day8_constraint_evidence", "status": "completed"},
-                    {"name": "day8_recommendation_reason", "status": "completed"},
-                ],
+                stages=reasoning_execution,
                 total_candidates=len(all_papers),
                 returned_results=len(results),
             ),

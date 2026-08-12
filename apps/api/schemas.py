@@ -66,14 +66,44 @@ class PipelineSummary(BaseModel):
     returned_results: int = 0
 
 
+class SearchReasoning(BaseModel):
+    """
+    User-facing, structured search reasoning trace.
+
+    This model describes observable search decisions and execution metadata.
+    It must not contain or imply private model chain-of-thought.
+    """
+
+    original_query: str
+    cleaned_query: str
+
+    constraints: list[dict[str, Any]] = Field(default_factory=list)
+    candidate_subqueries: list[dict[str, Any]] = Field(default_factory=list)
+
+    academic_anchors: list[dict[str, Any]] = Field(default_factory=list)
+    derived_aliases: list[str] = Field(default_factory=list)
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+    selected_plans: list[dict[str, Any]] = Field(default_factory=list)
+    execution: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SearchResponse(BaseModel):
     run_id: str
     query: str
     qid: str | None = None
     mode: Literal["benchmark", "live"]
+
+    # Day10 Search Explainability.
+    # Kept optional during additive rollout so existing benchmark/live response
+    # construction remains backward-compatible until SearchService integration.
+    reasoning: SearchReasoning | None = None
+
+    # Existing public fields are intentionally preserved for compatibility.
     parsed_constraints: list[dict[str, Any]] = Field(default_factory=list)
     academic_anchors: list[dict[str, Any]] = Field(default_factory=list)
     query_plan: list[dict[str, Any]] = Field(default_factory=list)
+
     results: list[PaperResult] = Field(default_factory=list)
     pipeline: PipelineSummary
     cost: CostSummary
