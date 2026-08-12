@@ -28,7 +28,12 @@ from scholarpath.rerank.evidence_aware_rerank import (
 from scholarpath.rerank.recommendation_reason import attach_recommendation_reason
 from scholarpath.retrieval.base import SearchRequest
 from scholarpath.retrieval.openalex import OpenAlexConfig, OpenAlexError, OpenAlexRetriever
-
+from scholarpath.retrieval.citation_path_builder import (
+    build_citation_path,
+)
+from scholarpath.retrieval.citation_resolver import (
+    resolve_citation_path,
+)
 
 class QueryNotFoundError(KeyError):
     pass
@@ -278,20 +283,36 @@ class SearchService:
         day8_record = _apply_day8_stack(dict(prediction), decomposition)
         plan = self.artifacts.query_plans().get(request.qid) or {}
         anchors = self.artifacts.anchor_inventory().get(request.qid) or {}
-        paths_by_qid = self.artifacts.day5_citation_paths()
-        citation_paths = paths_by_qid.get(request.qid, []) if request.enable_citation else []
-        path_by_paper: dict[str, dict[str, Any]] = {}
-        for path in citation_paths:
-            expanded = str(path.get("expanded_openalex_id") or "").rsplit("/", 1)[-1]
-            if expanded and expanded not in path_by_paper:
-                path_by_paper[expanded] = path
+        day9_path_by_paper = (
+            self.artifacts
+            .day9_citation_paths_by_paper(
+                request.qid
+            )
+        )
 
+        day5_path_by_paper = (
+            self.artifacts
+            .citation_paths_by_paper(
+                request.qid
+            )
+        )
+
+        path_by_paper = {
+            **day5_path_by_paper,
+            **day9_path_by_paper,
+        }
         papers = day8_record.get("papers") if isinstance(day8_record.get("papers"), list) else []
         results = [
             self._to_paper_result(
                 paper,
                 rank=index,
-                citation_path=path_by_paper.get(_paper_openalex_id(paper) or ""),
+                citation_path=resolve_citation_path(
+                    paper=paper,
+                    qid=request.qid,
+                    seed_rank=index,
+                    artifact_paths=path_by_paper,
+                    fallback_builder=None,
+                ),
             )
             for index, paper in enumerate(papers[: request.top_k], start=1)
             if isinstance(paper, dict)
@@ -312,12 +333,16 @@ class SearchService:
             stages.append(
                 {
                     "name": "day5_citation",
-                    "status": "candidate_discovery_only" if request.qid in self.artifacts.day5_seeds() else "not_triggered",
-                    "seed_count": len(day5_seeds.get("seeds") or []) if isinstance(day5_seeds, dict) else 0,
-                    "path_count": len(citation_paths),
+                    "status": "candidate_discovery_only"
+                    if request.qid in self.artifacts.day5_seeds()
+                    else "not_triggered",
+                    "seed_count": len(day5_seeds.get("seeds") or [])
+                    if isinstance(day5_seeds, dict)
+                    else 0,
+                    "path_count": len(path_by_paper),
                 }
             )
-            if citation_paths:
+            if path_by_paper:
                 warnings.append(
                     "Day-5 citation artifacts are shown as discovery/explanation paths and do not alter the Day8 E3 benchmark ranking."
                 )
@@ -410,8 +435,17 @@ class SearchService:
         record = {"qid": qid, "question": request.query, "papers": all_papers}
         reranked = _apply_day8_stack(record, decomposition)
         ranked_papers = list(reranked.get("papers") or [])[: min(request.top_k, self.settings.live_max_results)]
+      
         results = [
-            self._to_paper_result(paper, rank=index, citation_path=None)
+            self._to_paper_result(
+                paper,
+                rank=index,
+                citation_path=build_citation_path(
+                    paper=paper,
+                    qid=qid,
+                    seed_rank=index,
+                ),
+            )
             for index, paper in enumerate(ranked_papers, start=1)
             if isinstance(paper, dict)
         ]

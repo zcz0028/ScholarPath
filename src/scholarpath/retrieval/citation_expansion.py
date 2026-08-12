@@ -50,6 +50,8 @@ class CitationExpansionConfig:
     connect_timeout_seconds: float = 10.0
     read_timeout_seconds: float = 45.0
     user_agent: str = "ScholarPath/0.1 (controlled citation expansion)"
+    max_retries: int = 3
+    retry_backoff_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         if self.max_hops != 1:
@@ -152,10 +154,6 @@ class OpenAlexCitationProvider:
         if not self.api_key:
             raise RuntimeError("OPENALEX_API_KEY is not set")
 
-        # Count the attempt before sending the request. A timeout still consumed
-        # a real request attempt and therefore belongs in the budget.
-        self.budget.record_api_call()
-
         if kind == "seed":
             url = f"{self.base_url}/works/{work_id}"
             params = {
@@ -194,19 +192,33 @@ class OpenAlexCitationProvider:
             raise ValueError(f"Unknown request kind: {kind}")
 
         started = time.perf_counter()
-        response = self.session.get(
-            url,
-            params=params,
-            headers={"User-Agent": self.config.user_agent},
-            timeout=(
-                self.config.connect_timeout_seconds,
-                self.config.read_timeout_seconds,
-            ),
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("OpenAlex response must be a JSON object")
+        last_error: Exception | None = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                self.budget.record_api_call()
+                response = self.session.get(
+                    url,
+                    params=params,
+                    headers={"User-Agent": self.config.user_agent},
+                    timeout=(
+                        self.config.connect_timeout_seconds,
+                        self.config.read_timeout_seconds,
+                    ),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("OpenAlex response must be a JSON object")
+                break
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last_error = exc
+                if attempt >= self.config.max_retries:
+                    raise
+                time.sleep(self.config.retry_backoff_seconds * (2 ** attempt))
+        else:
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("OpenAlex request failed without an exception")
 
         payload["_latency_ms"] = (time.perf_counter() - started) * 1000.0
         cache_path.write_text(
