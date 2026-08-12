@@ -28,6 +28,7 @@ class ApiSettings(BaseSettings):
 
     day4_dir: Path = Path("outputs/week2_day4_rescue")
     day5_dir: Path = Path("outputs/week2_day5_citation")
+    day9_citation_dir: Path = Path("outputs/week2_day9_citation")
     frozen_baselines_path: Path = Path("configs/week2/frozen_baselines.json")
 
     live_max_plans: int = 2
@@ -56,6 +57,10 @@ class ApiSettings(BaseSettings):
     @property
     def resolved_day5_dir(self) -> Path:
         return self.resolve(self.day5_dir)
+
+    @property
+    def resolved_day9_citation_dir(self) -> Path:
+        return self.resolve(self.day9_citation_dir)
 
     @property
     def resolved_frozen_baselines_path(self) -> Path:

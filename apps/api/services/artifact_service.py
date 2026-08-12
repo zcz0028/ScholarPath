@@ -150,6 +150,30 @@ class ArtifactService:
                 output.setdefault(qid, []).append(row)
         return output
 
+    def day9_citation_paths(self) -> dict[str, list[dict[str, Any]]]:
+        rows = self._read_jsonl(
+            self.settings.resolved_day9_citation_dir / "citation_paths.jsonl",
+            required=False,
+        )
+        output: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            qid = str(row.get("qid") or "").strip()
+            if qid:
+                output.setdefault(qid, []).append(row)
+        return output
+
+    def day9_citation_paths_by_paper(
+        self,
+        qid: str,
+    ) -> dict[str, dict[str, Any]]:
+        paths = self.day9_citation_paths().get(qid, [])
+        output: dict[str, dict[str, Any]] = {}
+        for path in paths:
+            result_id = str(path.get("result_openalex_id") or "").strip()
+            if result_id:
+                output.setdefault(result_id, path)
+        return output
+
     def frozen_baselines(self) -> dict[str, Any]:
         return self._read_json(self.settings.resolved_frozen_baselines_path, required=False)
 
@@ -162,4 +186,40 @@ class ArtifactService:
             "day4_top50": (self.settings.resolved_day4_dir / "predictions_top50.jsonl").exists(),
             "day4_top100": (self.settings.resolved_day4_dir / "predictions_top100.jsonl").exists(),
             "day5_citation_paths": (self.settings.resolved_day5_dir / "citation_paths.jsonl").exists(),
+            "day9_citation_paths": (self.settings.resolved_day9_citation_dir / "citation_paths.jsonl").exists(),
         }
+    def citation_paths_by_paper(
+    self,
+    qid: str,
+    ) -> dict[str, dict[str, Any]]:
+
+        paths = self.day5_citation_paths().get(
+            qid,
+            [],
+        )
+
+        output = {}
+
+        for path in paths:
+            seed = path.get(
+                "seed_openalex_id"
+            )
+
+            expanded = path.get(
+                "expanded_openalex_id"
+            )
+
+
+            if seed:
+                output.setdefault(
+                    seed,
+                    path,
+                )
+
+            if expanded:
+                output.setdefault(
+                    expanded,
+                    path,
+                )
+
+        return output
