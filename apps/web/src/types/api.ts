@@ -60,11 +60,24 @@ export interface PipelineSummary {
   returned_results: number;
 }
 
+export interface SearchReasoning {
+  original_query: string;
+  cleaned_query: string;
+  constraints: Record<string, unknown>[];
+  candidate_subqueries: Record<string, unknown>[];
+  academic_anchors: Record<string, unknown>[];
+  derived_aliases: string[];
+  filters: Record<string, unknown>;
+  selected_plans: Record<string, unknown>[];
+  execution: Record<string, unknown>[];
+}
+
 export interface SearchResponse {
   run_id: string;
   query: string;
   qid?: string | null;
   mode: SearchMode;
+  reasoning?: SearchReasoning | null;
   parsed_constraints: Record<string, unknown>[];
   academic_anchors: Record<string, unknown>[];
   query_plan: Record<string, unknown>[];
