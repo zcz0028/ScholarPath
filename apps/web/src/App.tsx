@@ -107,7 +107,7 @@ export default function App() {
 
       {response && <>
         <SearchReasoning language={language} response={response} expanded={reasoningExpanded} onToggle={() => setReasoningExpanded((value) => !value)} />
-        <div className="workspace-grid">
+        <div className={`workspace-grid ${selectedPaper ? "paper-selected" : "paper-unselected"}`}>
           <div className="result-column">
             <PaperList language={language} papers={response.results} selectedPaper={selectedPaper} onSelectPaper={setSelectedPaper} />
           </div>

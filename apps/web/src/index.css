@@ -1569,3 +1569,120 @@ button:disabled {
     grid-template-columns: minmax(0, 2fr) minmax(350px, .95fr);
   }
 }
+
+/* =========================================================
+   Day14-2 — Dynamic synchronized result/detail workspace
+   ========================================================= */
+
+/*
+ * Grid already uses stretch.
+ *
+ * Keep both columns participating in the same grid-row height.
+ */
+.workspace-state .workspace-grid {
+  align-items: stretch;
+}
+
+/*
+ * The result column must be allowed to inherit the grid row height.
+ */
+.workspace-state .result-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * The list card fills the complete height assigned by the grid row.
+ */
+.workspace-state .result-column>.paper-list-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * ---------------------------------------------------------
+ * EMPTY DETAIL STATE
+ * ---------------------------------------------------------
+ *
+ * Before selecting a paper we intentionally retain the current
+ * competition-demo viewport height.
+ */
+.workspace-state .workspace-grid.paper-unselected .paper-list-card,
+.workspace-state .workspace-grid.paper-unselected .details-card {
+  min-height: 548px;
+}
+
+.workspace-state .workspace-grid.paper-unselected .paper-list {
+  max-height: 640px;
+  overflow-y: auto;
+}
+
+/*
+ * ---------------------------------------------------------
+ * SELECTED DETAIL STATE
+ * ---------------------------------------------------------
+ *
+ * Once a paper is selected, the right detail card may become
+ * taller because it contains recommendation reasoning,
+ * constraint evidence, metadata and actions.
+ *
+ * The grid row is then allowed to grow naturally.
+ */
+.workspace-state .workspace-grid.paper-selected {
+  min-height: 548px;
+}
+
+/*
+ * Do NOT impose a fixed maximum height on the left list card.
+ * Its outer height follows the detail card/grid row.
+ */
+.workspace-state .workspace-grid.paper-selected .paper-list-card {
+  height: 100%;
+  min-height: 548px;
+}
+
+/*
+ * This is the important override.
+ *
+ * Previous rules used max-height: 555/610/640px, which prevented
+ * the paper list from using the extra height created by PaperDetails.
+ */
+.workspace-state .workspace-grid.paper-selected .paper-list {
+  flex: 1 1 auto;
+
+  height: 0;
+  min-height: 0;
+  max-height: none;
+
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * Keep the toolbar fixed while only the actual result rows scroll.
+ */
+.workspace-state .workspace-grid.paper-selected .list-toolbar {
+  flex: 0 0 48px;
+}
+
+/*
+ * Detail card remains the natural-height driver of the grid row.
+ */
+.workspace-state .workspace-grid.paper-selected .details-card {
+  height: auto;
+  min-height: 548px;
+}
+
+/*
+ * Prevent long paper metadata from forcing either grid column wider.
+ */
+.workspace-state .workspace-grid.paper-selected .details-card,
+.workspace-state .workspace-grid.paper-selected .paper-list-card {
+  min-width: 0;
+}

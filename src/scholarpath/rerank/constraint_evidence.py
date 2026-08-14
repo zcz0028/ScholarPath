@@ -95,6 +95,20 @@ _RESIDUAL_BOUNDARY_TOKENS = {
     "which",
     "with",
     "work",
+    # Day14-1C prompt/discourse residue. These tokens are boundaries only during
+    # residual recovery; normal evidence matching is unaffected.
+    "can",
+    "claim",
+    "could",
+    "explaining",
+    "help",
+    "know",
+    "list",
+    "please",
+    "provide",
+    "supporting",
+    "want",
+    "why",
 }
 
 
@@ -359,6 +373,54 @@ def build_canonical_constraints(
     return deduplicate_constraints([*constraints, *residuals], config=cfg)
 
 
+
+_RESIDUAL_DANGLING_ENDINGS = {
+    "a", "an", "and", "as", "between", "by", "for", "from", "have", "has",
+    "in", "inductive", "into", "knowledgeable", "multiple", "of", "on", "or",
+    "such", "systematically", "the", "to", "using", "via", "with",
+}
+
+_RESIDUAL_GENERIC_TOKENS = {
+    "analysis", "approach", "data", "document", "learning", "method", "model",
+    "network", "paper", "prediction", "research", "result", "study", "system",
+    "task", "relationship", "relationships",
+}
+
+_RESIDUAL_PROTECTED_SHORT_TERMS = {
+    "ai", "ee", "gnn", "gnns", "hotpotqa", "imo", "llm", "llms", "ner",
+    "qat", "rag", "re", "rlhf", "sft",
+}
+
+
+def _residual_span_is_meaningful(value: object | None) -> bool:
+    """Quality guard for recovered query spans only.
+
+    Residual recovery is useful, but without a guard it can re-introduce the
+    same discourse/dangling fragments filtered by the planner. Short academic
+    entities remain explicitly protected.
+    """
+    normalized = normalize_constraint_text(value)
+    tokens = list(normalized_tokens(normalized))
+    if not tokens:
+        return False
+
+    if normalized in _RESIDUAL_PROTECTED_SHORT_TERMS:
+        return True
+
+    if len(tokens) == 1:
+        return False
+
+    if tokens[-1] in _RESIDUAL_DANGLING_ENDINGS:
+        return False
+
+    if "between" in tokens and tokens[-1] in {"between", "multiple"}:
+        return False
+
+    if len(tokens) <= 3 and all(token in _RESIDUAL_GENERIC_TOKENS for token in tokens):
+        return False
+
+    return True
+
 def recover_residual_constraint_spans(
     *,
     question: str,
@@ -396,7 +458,11 @@ def recover_residual_constraint_spans(
             return
         if cfg.residual_min_tokens <= len(current) <= cfg.residual_max_tokens:
             text = normalize_constraint_text(" ".join(current))
-            if text and len(normalized_tokens(text)) >= cfg.residual_min_tokens:
+            if (
+                text
+                and len(normalized_tokens(text)) >= cfg.residual_min_tokens
+                and _residual_span_is_meaningful(text)
+            ):
                 candidate_spans.append(text)
         current = []
 
@@ -411,7 +477,11 @@ def recover_residual_constraint_spans(
     seen: set[str] = set()
     for span in candidate_spans:
         canonical = canonical_alias_text(span)
-        if not canonical or canonical in seen:
+        if (
+            not canonical
+            or canonical in seen
+            or not _residual_span_is_meaningful(canonical)
+        ):
             continue
         # Residuals must add genuinely new content, not a differently chunked
         # restatement of an existing canonical concept.
